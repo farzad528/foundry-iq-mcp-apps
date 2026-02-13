@@ -1,0 +1,44 @@
+{
+  "manifest_version": "0.3",
+  "name": "foundry-iq-kb-app",
+  "display_name": "Foundry IQ Knowledge Base",
+  "version": "0.1.0",
+  "description": "Interactive document viewer for enterprise knowledge retrieval with evidence cards, passage highlighting, and source provenance.",
+  "long_description": "An MCP App server that renders Azure AI Search knowledge base retrieval results as interactive evidence cards with inline PDF viewing, passage highlighting, source metadata, relevance scoring, and checkpoint persistence for iterative exploration.",
+  "author": {
+    "name": "Farzad Sunavala",
+    "url": "https://github.com/Farzad528"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Farzad528/foundry-iq-mcp-apps.git"
+  },
+  "homepage": "https://github.com/Farzad528/foundry-iq-mcp-apps",
+  "icon": "docs/logo.png",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js", "--stdio"]
+    }
+  },
+  "tools": [
+    {
+      "name": "read_me",
+      "description": "Returns the Foundry IQ Knowledge Base format reference with field descriptions, usage tips, and examples. Call this before using knowledge_base_retrieve."
+    },
+    {
+      "name": "knowledge_base_retrieve",
+      "description": "Retrieves documents from a Foundry IQ knowledge base and renders results as interactive evidence cards with source metadata."
+    }
+  ],
+  "keywords": ["knowledge-base", "retrieval", "azure-ai-search", "enterprise", "mcp-app", "foundry-iq"],
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  },
+  "license": "MIT"
+}
