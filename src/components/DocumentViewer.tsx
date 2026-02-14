@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface DocumentViewerProps {
   documentUrl: string;
@@ -27,6 +27,10 @@ export function DocumentViewer({
   useEffect(() => {
     setCurrentPage(pageNumber);
   }, [pageNumber]);
+
+  useEffect(() => {
+    if (!isPdf) setLoading(false);
+  }, [isPdf]);
 
   const handlePageChange = (newPage: number) => {
     if (newPage >= 1 && newPage <= totalPages) {
@@ -92,7 +96,6 @@ export function DocumentViewer({
             <a href={documentUrl} target="_blank" rel="noopener noreferrer" className="open-external">
               Open original document →
             </a>
-            {!loading && setLoading(false) as any}
           </div>
         )}
 

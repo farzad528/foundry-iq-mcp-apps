@@ -1,5 +1,3 @@
-import React from "react";
-
 /** Source type color map. */
 const SOURCE_COLORS: Record<string, { bg: string; text: string; label: string }> = {
   sharepoint: { bg: "#dcfce7", text: "#166534", label: "SharePoint" },

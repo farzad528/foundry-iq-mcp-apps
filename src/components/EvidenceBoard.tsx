@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { EvidenceCard } from "./EvidenceCard.js";
 import { FilterPanel } from "./FilterPanel.js";
 import type { KBRetrieveResult } from "../types.js";
@@ -103,7 +103,7 @@ export function EvidenceBoard({
 
       {/* Results */}
       <div className="results-section">
-        {displayResults.map((r, i) => (
+        {displayResults.map((r) => (
           <EvidenceCard
             key={r.id}
             id={r.id}

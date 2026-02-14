@@ -6,13 +6,14 @@
  * and interactive evidence exploration.
  */
 
-import { createApp } from "@modelcontextprotocol/ext-apps/client";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useApp } from "@modelcontextprotocol/ext-apps/react";
+import { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DocumentViewer } from "./components/DocumentViewer.js";
 import { EvidenceBoard } from "./components/EvidenceBoard.js";
 import { MetadataSidebar } from "./components/MetadataSidebar.js";
 import type { KBRetrieveResult } from "./types.js";
+import "./global.css";
 
 interface AppState {
   results: KBRetrieveResult[];
@@ -26,7 +27,7 @@ interface AppState {
 }
 
 function KBApp() {
-  const appRef = useRef<ReturnType<typeof createApp> | null>(null);
+  const app = useApp();
   const [state, setState] = useState<AppState>({
     results: [],
     pinnedIds: [],
@@ -38,10 +39,9 @@ function KBApp() {
     loading: true,
   });
 
-  // Initialize MCP App SDK
+  // Initialize MCP App SDK events
   useEffect(() => {
-    const app = createApp();
-    appRef.current = app;
+    if (!app) return;
 
     // Handle streaming partial tool input
     app.on("toolinputpartial", (params: any) => {
@@ -73,7 +73,7 @@ function KBApp() {
 
           // Restore checkpoint if present
           if (data.checkpointId) {
-            restoreCheckpoint(app, data.checkpointId);
+            restoreCheckpoint(data.checkpointId);
           }
         }
       } catch (e) {
@@ -84,14 +84,11 @@ function KBApp() {
         }));
       }
     });
-
-    return () => {
-      appRef.current = null;
-    };
-  }, []);
+  }, [app]);
 
   // Restore checkpoint to get pinned cards
-  const restoreCheckpoint = useCallback(async (app: any, checkpointId: string) => {
+  const restoreCheckpoint = useCallback(async (checkpointId: string) => {
+    if (!app) return;
     try {
       const result = await app.callServerTool("read_checkpoint", { id: checkpointId });
       if (result?.content?.[0]?.text) {
@@ -103,7 +100,7 @@ function KBApp() {
     } catch {
       // Checkpoint not found — that's ok
     }
-  }, []);
+  }, [app]);
 
   // Handle card click → open document viewer + sidebar
   const handleCardClick = useCallback((result: KBRetrieveResult) => {
@@ -123,8 +120,8 @@ function KBApp() {
         : [...prev.pinnedIds, cardId];
 
       // Save to server
-      if (prev.checkpointId && appRef.current) {
-        appRef.current.callServerTool("pin_evidence", {
+      if (prev.checkpointId && app) {
+        app.callServerTool("pin_evidence", {
           checkpointId: prev.checkpointId,
           cardIds: newPinned,
         }).catch(() => {});
@@ -132,13 +129,13 @@ function KBApp() {
 
       return { ...prev, pinnedIds: newPinned };
     });
-  }, []);
+  }, [app]);
 
   // Handle filter
   const handleFilter = useCallback(async (sourceTypes: string[], minRelevance?: number) => {
-    if (!state.checkpointId || !appRef.current) return;
+    if (!state.checkpointId || !app) return;
     try {
-      const result = await appRef.current.callServerTool("filter_sources", {
+      const result = await app.callServerTool("filter_sources", {
         checkpointId: state.checkpointId,
         sourceTypes,
         minRelevance,
@@ -152,13 +149,13 @@ function KBApp() {
     } catch {
       // Filter failed — keep current results
     }
-  }, [state.checkpointId]);
+  }, [app, state.checkpointId]);
 
   // Handle fullscreen toggle
   const handleExpand = useCallback(() => {
     setState(prev => ({ ...prev, isFullscreen: true }));
-    appRef.current?.requestDisplayMode?.({ mode: "fullscreen" });
-  }, []);
+    app?.requestDisplayMode?.({ mode: "fullscreen" });
+  }, [app]);
 
   // Close document viewer
   const handleCloseViewer = useCallback(() => {
