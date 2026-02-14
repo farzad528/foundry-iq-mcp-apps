@@ -2,12 +2,12 @@
  * Foundry IQ Knowledge Base — MCP App Widget
  *
  * Main React entry point rendered inside the MCP host iframe.
- * Handles streaming tool results, checkpoint restore, display mode switching,
- * and interactive evidence exploration.
+ * Uses the @modelcontextprotocol/ext-apps SDK (same pattern as excalidraw-mcp).
  */
 
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
-import { useCallback, useEffect, useState } from "react";
+import type { App } from "@modelcontextprotocol/ext-apps";
+import { useCallback, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DocumentViewer } from "./components/DocumentViewer.js";
 import { EvidenceBoard } from "./components/EvidenceBoard.js";
@@ -15,170 +15,162 @@ import { MetadataSidebar } from "./components/MetadataSidebar.js";
 import type { KBRetrieveResult } from "./types.js";
 import "./global.css";
 
-interface AppState {
-  results: KBRetrieveResult[];
-  pinnedIds: string[];
-  checkpointId: string | null;
-  isFullscreen: boolean;
-  selectedResult: KBRetrieveResult | null;
-  showSidebar: boolean;
-  error: string | null;
-  loading: boolean;
+interface ToolInput {
+  results?: KBRetrieveResult[];
+  checkpointId?: string;
 }
 
 function KBApp() {
-  const app = useApp();
-  const [state, setState] = useState<AppState>({
-    results: [],
-    pinnedIds: [],
-    checkpointId: null,
-    isFullscreen: false,
-    selectedResult: null,
-    showSidebar: false,
-    error: null,
-    loading: true,
+  const appRef = useRef<App | null>(null);
+
+  const [results, setResults] = useState<KBRetrieveResult[]>([]);
+  const [pinnedIds, setPinnedIds] = useState<string[]>([]);
+  const [checkpointId, setCheckpointId] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [selectedResult, setSelectedResult] = useState<KBRetrieveResult | null>(null);
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [appError, setAppError] = useState<string | null>(null);
+
+  const { error: sdkError } = useApp({
+    appInfo: { name: "Foundry IQ Knowledge Base", version: "0.1.0" },
+    capabilities: {},
+    onAppCreated: (app: App) => {
+      appRef.current = app;
+
+      app.onhostcontextchanged = (ctx: any) => {
+        if (ctx.displayMode) {
+          setIsFullscreen(ctx.displayMode === "fullscreen");
+        }
+      };
+
+      app.ontoolinputpartial = async (input: any) => {
+        try {
+          const args: ToolInput = (input as any)?.arguments || input;
+          if (args?.results) {
+            setResults(args.results);
+            setLoading(false);
+          }
+        } catch {
+          // Partial data — ignore until parseable
+        }
+      };
+
+      app.ontoolinput = async (input: any) => {
+        try {
+          const args: ToolInput = (input as any)?.arguments || input;
+          if (args?.results) {
+            setResults(args.results);
+            setLoading(false);
+          }
+        } catch (e) {
+          setAppError(`Failed to parse results: ${(e as Error).message}`);
+          setLoading(false);
+        }
+      };
+
+      app.ontoolresult = (result: any) => {
+        const cpId = (result.structuredContent as { checkpointId?: string })?.checkpointId;
+        if (cpId) {
+          setCheckpointId(cpId);
+          restoreCheckpoint(cpId);
+        }
+      };
+
+      app.onerror = (err: any) => console.error("[FoundryIQ] Error:", err);
+    },
   });
 
-  // Initialize MCP App SDK events
-  useEffect(() => {
-    if (!app) return;
-
-    // Handle streaming partial tool input
-    app.on("toolinputpartial", (params: any) => {
-      try {
-        const data = typeof params === "string" ? JSON.parse(params) : params;
-        if (data?.results) {
-          setState(prev => ({
-            ...prev,
-            results: data.results,
-            loading: false,
-          }));
-        }
-      } catch {
-        // Partial JSON — ignore until parseable
-      }
-    });
-
-    // Handle final tool input
-    app.on("toolinput", (params: any) => {
-      try {
-        const data = typeof params === "string" ? JSON.parse(params) : params;
-        if (data?.results) {
-          setState(prev => ({
-            ...prev,
-            results: data.results,
-            checkpointId: data.checkpointId ?? null,
-            loading: false,
-          }));
-
-          // Restore checkpoint if present
-          if (data.checkpointId) {
-            restoreCheckpoint(data.checkpointId);
-          }
-        }
-      } catch (e) {
-        setState(prev => ({
-          ...prev,
-          error: `Failed to parse results: ${(e as Error).message}`,
-          loading: false,
-        }));
-      }
-    });
-  }, [app]);
-
   // Restore checkpoint to get pinned cards
-  const restoreCheckpoint = useCallback(async (checkpointId: string) => {
-    if (!app) return;
+  const restoreCheckpoint = useCallback(async (cpId: string) => {
+    if (!appRef.current) return;
     try {
-      const result = await app.callServerTool("read_checkpoint", { id: checkpointId });
-      if (result?.content?.[0]?.text) {
-        const data = JSON.parse(result.content[0].text);
+      const result = await appRef.current.callServerTool({
+        name: "read_checkpoint",
+        arguments: { id: cpId },
+      });
+      const text = (result.content[0] as any)?.text;
+      if (text) {
+        const data = JSON.parse(text);
         if (data.pinnedCardIds?.length) {
-          setState(prev => ({ ...prev, pinnedIds: data.pinnedCardIds }));
+          setPinnedIds(data.pinnedCardIds);
         }
       }
     } catch {
       // Checkpoint not found — that's ok
     }
-  }, [app]);
-
-  // Handle card click → open document viewer + sidebar
-  const handleCardClick = useCallback((result: KBRetrieveResult) => {
-    setState(prev => ({
-      ...prev,
-      selectedResult: result,
-      showSidebar: true,
-    }));
   }, []);
 
-  // Handle pin toggle
-  const handlePin = useCallback(async (cardId: string) => {
-    setState(prev => {
-      const isPinned = prev.pinnedIds.includes(cardId);
-      const newPinned = isPinned
-        ? prev.pinnedIds.filter(id => id !== cardId)
-        : [...prev.pinnedIds, cardId];
+  const handleCardClick = useCallback((result: KBRetrieveResult) => {
+    setSelectedResult(result);
+    setShowSidebar(true);
+  }, []);
 
-      // Save to server
-      if (prev.checkpointId && app) {
-        app.callServerTool("pin_evidence", {
-          checkpointId: prev.checkpointId,
-          cardIds: newPinned,
+  const handlePin = useCallback(async (cardId: string) => {
+    setPinnedIds(prev => {
+      const isPinned = prev.includes(cardId);
+      const newPinned = isPinned ? prev.filter(id => id !== cardId) : [...prev, cardId];
+
+      if (checkpointId && appRef.current) {
+        appRef.current.callServerTool({
+          name: "pin_evidence",
+          arguments: { checkpointId, cardIds: newPinned },
         }).catch(() => {});
       }
 
-      return { ...prev, pinnedIds: newPinned };
+      return newPinned;
     });
-  }, [app]);
+  }, [checkpointId]);
 
-  // Handle filter
   const handleFilter = useCallback(async (sourceTypes: string[], minRelevance?: number) => {
-    if (!state.checkpointId || !app) return;
+    if (!checkpointId || !appRef.current) return;
     try {
-      const result = await app.callServerTool("filter_sources", {
-        checkpointId: state.checkpointId,
-        sourceTypes,
-        minRelevance,
+      const result = await appRef.current.callServerTool({
+        name: "filter_sources",
+        arguments: { checkpointId, sourceTypes, minRelevance },
       });
-      if (result?.content?.[0]?.text) {
-        const data = JSON.parse(result.content[0].text);
-        if (data.results) {
-          setState(prev => ({ ...prev, results: data.results }));
-        }
+      const text = (result.content[0] as any)?.text;
+      if (text) {
+        const data = JSON.parse(text);
+        if (data.results) setResults(data.results);
       }
     } catch {
       // Filter failed — keep current results
     }
-  }, [app, state.checkpointId]);
+  }, [checkpointId]);
 
-  // Handle fullscreen toggle
-  const handleExpand = useCallback(() => {
-    setState(prev => ({ ...prev, isFullscreen: true }));
-    app?.requestDisplayMode?.({ mode: "fullscreen" });
-  }, [app]);
-
-  // Close document viewer
-  const handleCloseViewer = useCallback(() => {
-    setState(prev => ({ ...prev, selectedResult: null, showSidebar: false }));
+  const handleExpand = useCallback(async () => {
+    if (!appRef.current) return;
+    try {
+      await appRef.current.requestDisplayMode({ mode: "fullscreen" });
+      setIsFullscreen(true);
+    } catch {
+      // Display mode not supported
+    }
   }, []);
 
-  // Error state
-  if (state.error) {
+  const handleCloseViewer = useCallback(() => {
+    setSelectedResult(null);
+    setShowSidebar(false);
+  }, []);
+
+  const displayError = appError || (sdkError ? String(sdkError) : null);
+
+  if (displayError) {
     return (
       <div className="kb-app error-state">
         <p className="error-message">Unable to retrieve results</p>
-        <p className="error-detail">{state.error}</p>
+        <p className="error-detail">{displayError}</p>
       </div>
     );
   }
 
-  // Loading state
-  if (state.loading && state.results.length === 0) {
+  if (loading && results.length === 0) {
     return (
       <div className="kb-app loading-state">
         <div className="skeleton-cards">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="skeleton-card">
+          {[1, 2, 3].map(n => (
+            <div key={n} className="skeleton-card">
               <div className="skeleton-line title" />
               <div className="skeleton-line content" />
               <div className="skeleton-line content short" />
@@ -191,12 +183,12 @@ function KBApp() {
   }
 
   return (
-    <div className={`kb-app ${state.isFullscreen ? "fullscreen-mode" : "inline-mode"}`}>
+    <div className={`kb-app ${isFullscreen ? "fullscreen-mode" : "inline-mode"}`}>
       <div className="kb-main">
         <EvidenceBoard
-          results={state.results}
-          pinnedIds={state.pinnedIds}
-          isFullscreen={state.isFullscreen}
+          results={results}
+          pinnedIds={pinnedIds}
+          isFullscreen={isFullscreen}
           onCardClick={handleCardClick}
           onPin={handlePin}
           onExpandClick={handleExpand}
@@ -204,34 +196,32 @@ function KBApp() {
         />
       </div>
 
-      {/* Document Viewer + Metadata Sidebar */}
-      {state.selectedResult && (
+      {selectedResult && (
         <div className="kb-detail-panel">
           <DocumentViewer
-            documentUrl={state.selectedResult.documentUrl}
-            pageNumber={state.selectedResult.pageNumber}
-            totalPages={state.selectedResult.totalPages}
-            highlightOffsets={state.selectedResult.chunkOffsets}
+            documentUrl={selectedResult.documentUrl}
+            pageNumber={selectedResult.pageNumber}
+            totalPages={selectedResult.totalPages}
+            highlightOffsets={selectedResult.chunkOffsets}
             onClose={handleCloseViewer}
           />
-          {state.showSidebar && (
+          {showSidebar && (
             <MetadataSidebar
-              title={state.selectedResult.title}
-              relevanceScore={state.selectedResult.relevanceScore}
-              pageNumber={state.selectedResult.pageNumber}
-              totalPages={state.selectedResult.totalPages}
-              sourceType={state.selectedResult.sourceType}
-              documentUrl={state.selectedResult.documentUrl}
-              lastModified={state.selectedResult.lastModified}
-              purviewLabels={state.selectedResult.purviewLabels}
-              onClose={() => setState(prev => ({ ...prev, showSidebar: false }))}
+              title={selectedResult.title}
+              relevanceScore={selectedResult.relevanceScore}
+              pageNumber={selectedResult.pageNumber}
+              totalPages={selectedResult.totalPages}
+              sourceType={selectedResult.sourceType}
+              documentUrl={selectedResult.documentUrl}
+              lastModified={selectedResult.lastModified}
+              purviewLabels={selectedResult.purviewLabels}
+              onClose={() => setShowSidebar(false)}
             />
           )}
         </div>
       )}
 
-      {/* Fullscreen toggle */}
-      {!state.isFullscreen && state.results.length > 0 && (
+      {!isFullscreen && results.length > 0 && (
         <button className="fullscreen-toggle" onClick={handleExpand} title="Fullscreen">
           ⛶
         </button>
@@ -240,7 +230,6 @@ function KBApp() {
   );
 }
 
-// Mount the app
 const root = document.createElement("div");
 root.id = "kb-root";
 document.body.appendChild(root);
