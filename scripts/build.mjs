@@ -29,10 +29,10 @@ function tryRun(cmd, env = {}) {
 rmSync(join(root, "dist"), { recursive: true, force: true });
 
 // 1. Type-check
-run("tsc --noEmit");
+run("npx tsc --noEmit");
 
 // 2. Vite build (singlefile HTML)
-run("vite build");
+run("npx vite build");
 
 // 3. Move the HTML output to dist root
 const srcHtml = join(root, "dist", "src", "mcp-app.html");
@@ -42,7 +42,7 @@ if (existsSync(srcHtml)) {
 }
 
 // 4. Build server types
-run("tsc -p tsconfig.server.json");
+run("npx tsc -p tsconfig.server.json");
 
 // 5. Bundle server + index (requires bun — optional for Vercel serverless)
 tryRun('bun build "src/server.ts" --outdir dist --target node');
