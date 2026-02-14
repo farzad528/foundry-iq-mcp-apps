@@ -305,6 +305,10 @@ If the user wants to refine, they can filter by source type or pin important evi
           text: html,
           _meta: {
             ui: {
+              csp: {
+                resourceDomains: ["https://esm.sh"],
+                connectDomains: ["https://esm.sh"],
+              },
               prefersBorder: true,
             },
           },
