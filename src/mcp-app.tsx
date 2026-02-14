@@ -15,11 +15,6 @@ import { MetadataSidebar } from "./components/MetadataSidebar.js";
 import type { KBRetrieveResult } from "./types.js";
 import "./global.css";
 
-interface ToolInput {
-  results?: KBRetrieveResult[];
-  checkpointId?: string;
-}
-
 function KBApp() {
   const appRef = useRef<App | null>(null);
 
@@ -30,7 +25,6 @@ function KBApp() {
   const [selectedResult, setSelectedResult] = useState<KBRetrieveResult | null>(null);
   const [showSidebar, setShowSidebar] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [appError, setAppError] = useState<string | null>(null);
 
   const { error: sdkError } = useApp({
     appInfo: { name: "Foundry IQ Knowledge Base", version: "0.1.0" },
@@ -44,62 +38,45 @@ function KBApp() {
         }
       };
 
-      app.ontoolinputpartial = async (input: any) => {
-        try {
-          const args: ToolInput = (input as any)?.arguments || input;
-          if (args?.results) {
-            setResults(args.results);
-            setLoading(false);
-          }
-        } catch {
-          // Partial data — ignore until parseable
-        }
+      app.ontoolinputpartial = async (_input: any) => {
+        // Tool input contains the query arguments, not results.
+        // Results arrive via ontoolresult. Show loading state.
+        setLoading(true);
       };
 
-      app.ontoolinput = async (input: any) => {
-        try {
-          const args: ToolInput = (input as any)?.arguments || input;
-          if (args?.results) {
-            setResults(args.results);
-            setLoading(false);
-          }
-        } catch (e) {
-          setAppError(`Failed to parse results: ${(e as Error).message}`);
-          setLoading(false);
-        }
+      app.ontoolinput = async (_input: any) => {
+        // Tool input finalized — results will arrive via ontoolresult
+        setLoading(true);
       };
 
       app.ontoolresult = (result: any) => {
-        const cpId = (result.structuredContent as { checkpointId?: string })?.checkpointId;
-        if (cpId) {
-          setCheckpointId(cpId);
-          restoreCheckpoint(cpId);
+        // structuredContent contains { results, queryPlan, checkpointId }
+        const sc = result.structuredContent as any;
+        if (sc?.results) {
+          setResults(sc.results);
+          setLoading(false);
+        }
+        if (sc?.checkpointId) {
+          setCheckpointId(sc.checkpointId);
+        }
+
+        // Also check content text fallback (for hosts that don't send structuredContent)
+        if (!sc?.results && result.content) {
+          try {
+            const text = result.content.find((c: any) => c.type === "text")?.text;
+            if (text) {
+              // Results came as text — just stop loading
+              setLoading(false);
+            }
+          } catch {
+            setLoading(false);
+          }
         }
       };
 
       app.onerror = (err: any) => console.error("[FoundryIQ] Error:", err);
     },
   });
-
-  // Restore checkpoint to get pinned cards
-  const restoreCheckpoint = useCallback(async (cpId: string) => {
-    if (!appRef.current) return;
-    try {
-      const result = await appRef.current.callServerTool({
-        name: "read_checkpoint",
-        arguments: { id: cpId },
-      });
-      const text = (result.content[0] as any)?.text;
-      if (text) {
-        const data = JSON.parse(text);
-        if (data.pinnedCardIds?.length) {
-          setPinnedIds(data.pinnedCardIds);
-        }
-      }
-    } catch {
-      // Checkpoint not found — that's ok
-    }
-  }, []);
 
   const handleCardClick = useCallback((result: KBRetrieveResult) => {
     setSelectedResult(result);
@@ -154,7 +131,7 @@ function KBApp() {
     setShowSidebar(false);
   }, []);
 
-  const displayError = appError || (sdkError ? String(sdkError) : null);
+  const displayError = sdkError ? String(sdkError) : null;
 
   if (displayError) {
     return (
